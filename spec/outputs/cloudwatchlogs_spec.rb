@@ -53,7 +53,7 @@ describe "outputs/cloudwatchlogs" do
         "log_group_name" => "lg", "log_stream_name" => "ls",
         "batch_count" => LogStash::Outputs::CloudWatchLogs::MAX_BATCH_COUNT + 1)
       expect {output.register}.to_not raise_error
-      output.batch_count.should eql(LogStash::Outputs::CloudWatchLogs::MAX_BATCH_COUNT)
+      expect(output.batch_count).to eq(LogStash::Outputs::CloudWatchLogs::MAX_BATCH_COUNT)
     end
 
     it "should set the batch_size to MAX_BATCH_SIZE if a larger value is configured" do
@@ -61,7 +61,7 @@ describe "outputs/cloudwatchlogs" do
         "log_group_name" => "lg", "log_stream_name" => "ls",
         "batch_count" => LogStash::Outputs::CloudWatchLogs::MAX_BATCH_SIZE + 1)
       expect {output.register}.to_not raise_error
-      output.batch_size.should eql(LogStash::Outputs::CloudWatchLogs::MAX_BATCH_SIZE)
+      expect(output.batch_size).to eq(LogStash::Outputs::CloudWatchLogs::MAX_BATCH_SIZE)
     end
 
     it "should set the buffer_duration to MIN_BUFFER_DURATION if a smaler value is configured" do
@@ -69,7 +69,7 @@ describe "outputs/cloudwatchlogs" do
         "log_group_name" => "lg", "log_stream_name" => "ls",
         "buffer_duration" => LogStash::Outputs::CloudWatchLogs::MIN_BUFFER_DURATION - 1)
       expect {output.register}.to_not raise_error
-      output.buffer_duration.should eql(LogStash::Outputs::CloudWatchLogs::MIN_BUFFER_DURATION)
+      expect(output.buffer_duration).to eq(LogStash::Outputs::CloudWatchLogs::MIN_BUFFER_DURATION)
     end
   end
 
@@ -84,7 +84,7 @@ describe "outputs/cloudwatchlogs" do
       before :each do
         @event = LogStash::Event.new
         @event.timestamp = LogStash::Timestamp.coerce("2015-02-13T01:19:08Z")
-        @event["message"] = "test"
+        @event.set("message", "test")
         expect(@output.buffer).not_to receive(:enq)
       end
       context "when event doesn't have @timestamp" do
@@ -107,7 +107,7 @@ describe "outputs/cloudwatchlogs" do
           expect(@output.buffer).to receive(:enq) { {:timestamp => 1423786748000.0, :message => "test"} }
           event = LogStash::Event.new
           event.timestamp = LogStash::Timestamp.coerce("2015-02-13T01:19:08Z")
-          event["message"] = "test"
+          event.set("message", "test")
           expect { @output.receive(event) }.to_not raise_error
         end
       end
@@ -453,49 +453,49 @@ describe "outputs/cloudwatchlogs/buffer" do
       context "when the number of items is less than max batch count" do
         it "should accept an item" do
           @buffer.enq("ab")
-          @buffer.in_batch.should eql(["ab"])
-          @buffer.in_size.should == 2
-          @buffer.in_count.should == 1
+          expect(@buffer.in_batch).to eq(["ab"])
+          expect(@buffer.in_size).to eq(2)
+          expect(@buffer.in_count).to eq(1)
         end
       end
 
       context "when the number of items is equal to the max batch size" do
         it "should batch items to the out queue and current batch is empty" do
           5.times do |i| @buffer.enq("#{i}") end
-          @buffer.in_batch.should eql([])
-          @buffer.out_queue.deq(true).should eql(["0", "1", "2", "3", "4"])
-          @buffer.in_size.should == 0
-          @buffer.in_count.should == 0
+          expect(@buffer.in_batch).to eq([])
+          expect(@buffer.out_queue.deq(true)).to eq(["0", "1", "2", "3", "4"])
+          expect(@buffer.in_size).to eq(0)
+          expect(@buffer.in_count).to eq(0)
         end
       end
 
       context "when the number of items is greater than the max batch size" do
         it "should batch items to the out queue" do
           6.times do |i| @buffer.enq("#{i}") end
-          @buffer.in_batch.should eql(["5"])
-          @buffer.out_queue.deq(true).should eql(["0", "1", "2", "3", "4"])
-          @buffer.in_size.should eql(1)
-          @buffer.in_count.should eql(1)
+          expect(@buffer.in_batch).to eql(["5"])
+          expect(@buffer.out_queue.deq(true)).to eql(["0", "1", "2", "3", "4"])
+          expect(@buffer.in_size).to eql(1)
+          expect(@buffer.in_count).to eql(1)
         end
       end
 
       context "when the size of items is equal to the max batch size" do
         it "should batch items to the out queue and current batch is empty" do
           2.times do |i| @buffer.enq("abcd#{i}") end
-          @buffer.in_batch.should eql([])
-          @buffer.out_queue.deq(true).should eql(["abcd0", "abcd1"])
-          @buffer.in_size.should == 0
-          @buffer.in_count.should == 0
+          expect(@buffer.in_batch).to eql([])
+          expect(@buffer.out_queue.deq(true)).to eql(["abcd0", "abcd1"])
+          expect(@buffer.in_size).to eq(0)
+          expect(@buffer.in_count).to eq(0)
         end
       end
 
       context "when the size of items is greater than max batch size" do
         it "should batch items to the out queue" do
           3.times do |i| @buffer.enq("abc#{i}") end
-          @buffer.in_batch.should eql(["abc2"])
-          @buffer.out_queue.deq(true).should eql(["abc0", "abc1"])
-          @buffer.in_size.should == 4
-          @buffer.in_count.should == 1
+          expect(@buffer.in_batch).to eql(["abc2"])
+          expect(@buffer.out_queue.deq(true)).to eql(["abc0", "abc1"])
+          expect(@buffer.in_size).to eq(4)
+          expect(@buffer.in_count).to eq(1)
         end
       end
     end
@@ -512,10 +512,10 @@ describe "outputs/cloudwatchlogs/buffer" do
         it "should batch items to the out queue" do
           @buffer.enq("ab")
           sleep(2)
-          @buffer.in_batch.should eql([])
-          @buffer.out_queue.deq(true).should eql(["ab"])
-          @buffer.in_size.should == 0
-          @buffer.in_count.should == 0
+          expect(@buffer.in_batch).to eql([])
+          expect(@buffer.out_queue.deq(true)).to eql(["ab"])
+          expect(@buffer.in_size).to eq(0)
+          expect(@buffer.in_count).to eq(0)
         end
       end
     end
@@ -538,12 +538,12 @@ describe "outputs/cloudwatchlogs/buffer" do
           while !@buffer.out_queue.empty? do
             batches << @buffer.out_queue.deq(true)
           end
-          batches.size.should >= 4
-          batches.size.should <= 5
+          expect(batches.size).to be >= 4
+          expect(batches.size).to be <= 5
           batches.shift
           batches.pop
           batches.each do |batch|
-            batch.size.should == 5
+            expect(batch.size).to eq(5)
           end
         end
       end
@@ -564,7 +564,7 @@ describe "outputs/cloudwatchlogs/buffer" do
         sleep(0.01)
       end
       @buffer.close
-      @buffer.in_count.should == 0
+      expect(@buffer.in_count).to eq(0)
       consumer.join
     end
   end
@@ -587,7 +587,7 @@ describe "outputs/cloudwatchlogs/buffer" do
       end
       @buffer.close
       consumer.join
-      item_count.should == 33
+      expect(item_count).to eq(33)
     end
   end
 
@@ -619,6 +619,6 @@ describe "outputs/cloudwatchlogs/buffer" do
     @buffer.close
     # let consumer complete the read
     consumer.join
-    item_count.should == num_of_items * num_of_threads
+    expect(item_count).to eq(num_of_items * num_of_threads)
   end
 end
