@@ -19,6 +19,9 @@ require "logstash/namespace"
 require "logstash/plugin_mixins/aws_config"
 
 require "time"
+require "aws-sdk"
+
+Aws.eager_autoload!(services: %w(CloudWatchLogs))
 
 # This output lets you send log data to AWS CloudWatch Logs service
 #
@@ -27,6 +30,8 @@ class LogStash::Outputs::CloudWatchLogs < LogStash::Outputs::Base
   include LogStash::PluginMixins::AwsConfig::V2
 
   config_name "cloudwatchlogs"
+  default :codec, "plain"
+  concurrency :single
 
   # Constants
   LOG_GROUP_NAME = "log_group_name"
@@ -80,7 +85,6 @@ class LogStash::Outputs::CloudWatchLogs < LogStash::Outputs::Base
 
   public
   def register
-    require "aws-sdk"
     @cwl = Aws::CloudWatchLogs::Client.new(aws_options_hash)
 
     if @batch_count > MAX_BATCH_COUNT
@@ -145,7 +149,7 @@ class LogStash::Outputs::CloudWatchLogs < LogStash::Outputs::Base
       @codec.encode(event)
     else
       @buffer.enq({:timestamp => event.timestamp.time.to_f*1000,
-       :message => event[MESSAGE] })
+       :message => event.get(MESSAGE) })
     end
   end # def receive
 
@@ -246,7 +250,7 @@ class LogStash::Outputs::CloudWatchLogs < LogStash::Outputs::Base
 
   private
   def invalid?(event)
-    status = event[TIMESTAMP].nil? || (!@use_codec && event[MESSAGE].nil?)
+    status = event.get(TIMESTAMP).nil? || (!@use_codec && event.get(MESSAGE).nil?)
     if status
       @logger.warn("Skipping invalid event #{event.to_hash}")
     end
