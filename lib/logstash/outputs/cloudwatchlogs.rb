@@ -29,17 +29,16 @@ class LogStash::Outputs::CloudWatchLogs < LogStash::Outputs::Base
 
   include LogStash::PluginMixins::AwsConfig::V2
 
+  require "logstash/outputs/cloudwatchlogs/common_configs"
+  include(LogStash::Outputs::CloudWatchLogs::CommonConfigs)
+
   config_name "cloudwatchlogs"
   default :codec, "plain"
   concurrency :single
 
   # Constants
-  LOG_GROUP_NAME = "log_group_name"
-  LOG_STREAM_NAME = "log_stream_name"
-  SEQUENCE_TOKEN = "sequence_token"
   TIMESTAMP = "@timestamp"
   MESSAGE = "message"
-
   PER_EVENT_OVERHEAD = 26
   MAX_BATCH_SIZE = 1024 * 1024
   MAX_BATCH_COUNT = 10000
@@ -53,7 +52,7 @@ class LogStash::Outputs::CloudWatchLogs < LogStash::Outputs::Base
   config :log_group_name, :validate => :string, :required => true
 
   # The destination log stream
-  config :log_stream_name, :validate => :string, :required => true
+  # config :log_stream_name, :validate => :string, :required => true
 
   # The max number of log events in a batch.
   config :batch_count, :validate => :number, :default => MAX_BATCH_COUNT
@@ -111,20 +110,20 @@ class LogStash::Outputs::CloudWatchLogs < LogStash::Outputs::Base
       end
     end
 
-    if @log_stream_name.include? "%instance_id%"
-      require "net/http"
-      @log_stream_name.gsub!("%instance_id%", Net::HTTP.get(URI.parse("http://169.254.169.254/latest/meta-data/instance-id")))
-    end
+    # if @log_stream_name.include? "%instance_id%"
+    #   require "net/http"
+    #   @log_stream_name.gsub!("%instance_id%", Net::HTTP.get(URI.parse("http://169.254.169.254/latest/meta-data/instance-id")))
+    # end
 
-    if @log_stream_name.include? "%hostname%"
-      require "socket"
-      @log_stream_name.gsub!("%hostname%", Socket.gethostname)
-    end
+    # if @log_stream_name.include? "%hostname%"
+    #   require "socket"
+    #   @log_stream_name.gsub!("%hostname%", Socket.gethostname)
+    # end
 
-    if @log_stream_name.include? "%ipv4%"
-      require "socket"
-      @log_stream_name.gsub!("%ipv4%", Socket.ip_address_list.find { |ai| ai.ipv4? && !ai.ipv4_loopback? }.ip_address)
-    end
+    # if @log_stream_name.include? "%ipv4%"
+    #   require "socket"
+    #   @log_stream_name.gsub!("%ipv4%", Socket.ip_address_list.find { |ai| ai.ipv4? && !ai.ipv4_loopback? }.ip_address)
+    # end
 
     if @use_codec
       @codec.on_event() {|event, payload| @buffer.enq({:timestamp => event.timestamp.time.to_f*1000,
