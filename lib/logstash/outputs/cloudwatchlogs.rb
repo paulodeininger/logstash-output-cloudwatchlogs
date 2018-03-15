@@ -34,9 +34,6 @@ class LogStash::Outputs::CloudWatchLogs < LogStash::Outputs::Base
   concurrency :single
 
   # Constants
-  LOG_GROUP_NAME = "log_group_name"
-  LOG_STREAM_NAME = "log_stream_name"
-  SEQUENCE_TOKEN = "sequence_token"
   TIMESTAMP = "@timestamp"
   MESSAGE = "message"
 
@@ -78,13 +75,15 @@ class LogStash::Outputs::CloudWatchLogs < LogStash::Outputs::Base
   # Print out the log events to stdout
   config :dry_run, :validate => :boolean, :default => false
 
-  attr_accessor :sequence_token, :last_flush, :cwl
+  attr_accessor :last_flush, :cwl, :cwl_cfg
 
   # Only accessed by tests
   attr_reader :buffer
 
   public
   def register
+    @cwl_cfg = Hash.new
+    @logger.info("aws_options_hash #{aws_options_hash}")
     @cwl = Aws::CloudWatchLogs::Client.new(aws_options_hash)
 
     if @batch_count > MAX_BATCH_COUNT
@@ -111,21 +110,6 @@ class LogStash::Outputs::CloudWatchLogs < LogStash::Outputs::Base
       end
     end
 
-    if @log_stream_name.include? "%instance_id%"
-      require "net/http"
-      @log_stream_name.gsub!("%instance_id%", Net::HTTP.get(URI.parse("http://169.254.169.254/latest/meta-data/instance-id")))
-    end
-
-    if @log_stream_name.include? "%hostname%"
-      require "socket"
-      @log_stream_name.gsub!("%hostname%", Socket.gethostname)
-    end
-
-    if @log_stream_name.include? "%ipv4%"
-      require "socket"
-      @log_stream_name.gsub!("%ipv4%", Socket.ip_address_list.find { |ai| ai.ipv4? && !ai.ipv4_loopback? }.ip_address)
-    end
-
     if @use_codec
       @codec.on_event() {|event, payload| @buffer.enq({:timestamp => event.timestamp.time.to_f*1000,
         :message => payload})}
@@ -135,6 +119,8 @@ class LogStash::Outputs::CloudWatchLogs < LogStash::Outputs::Base
   public
   def receive(event)
     return unless output?(event)
+    @cwl_cfg[:log_group_name] = event.sprintf(@log_group_name)
+    @cwl_cfg[:log_stream_name] = event.sprintf(@log_stream_name)
 
     if event == LogStash::SHUTDOWN
       @buffer.close
@@ -178,7 +164,7 @@ class LogStash::Outputs::CloudWatchLogs < LogStash::Outputs::Base
     sleep(delay) if delay > 0
     backoff = 1
     begin
-      @logger.info("Sending #{log_events.size} events to #{@log_group_name}/#{@log_stream_name}")
+      @logger.info("Sending #{log_events.size} events to #{@cwl_cfg[:log_group_name]}/#{@cwl_cfg[:log_stream_name]}")
       @last_flush = Time.now.to_f
       if @dry_run
         log_events.each do |event|
@@ -187,8 +173,8 @@ class LogStash::Outputs::CloudWatchLogs < LogStash::Outputs::Base
         return
       end
       response = @cwl.put_log_events(
-          :log_group_name => @log_group_name,
-          :log_stream_name => @log_stream_name,
+          :log_group_name => @cwl_cfg[:log_group_name],
+          :log_stream_name => @cwl_cfg[:log_stream_name],
           :log_events => log_events,
           :sequence_token => @sequence_token
       )
@@ -221,14 +207,14 @@ class LogStash::Outputs::CloudWatchLogs < LogStash::Outputs::Base
     rescue Aws::CloudWatchLogs::Errors::ResourceNotFoundException => e
       @logger.info("Will create log group/stream and retry")
       begin
-        @cwl.create_log_group(:log_group_name => @log_group_name)
+        @cwl.create_log_group(:log_group_name => @cwl_cfg[:log_group_name])
       rescue Aws::CloudWatchLogs::Errors::ResourceAlreadyExistsException => e
-        @logger.info("Log group #{@log_group_name} already exists")
+        @logger.info("Log group #{@cwl_cfg[:log_group_name]} already exists")
       rescue Exception => e
         @logger.error(e)
       end
       begin
-        @cwl.create_log_stream(:log_group_name => @log_group_name, :log_stream_name => @log_stream_name)
+        @cwl.create_log_stream(:log_group_name => @cwl_cfg[:log_group_name], :log_stream_name => @cwl_cfg[:log_stream_name])
       rescue Aws::CloudWatchLogs::Errors::ResourceAlreadyExistsException => e
         @logger.info("Log stream #{@log_stream_name} already exists")
       rescue Exception => e
