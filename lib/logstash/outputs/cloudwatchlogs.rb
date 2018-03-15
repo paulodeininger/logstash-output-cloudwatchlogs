@@ -75,7 +75,7 @@ class LogStash::Outputs::CloudWatchLogs < LogStash::Outputs::Base
   # Print out the log events to stdout
   config :dry_run, :validate => :boolean, :default => false
 
-  attr_accessor :last_flush, :cwl, :cwl_cfg
+  attr_accessor :sequence_token, :last_flush, :cwl, :cwl_cfg
 
   # Only accessed by tests
   attr_reader :buffer
@@ -98,7 +98,7 @@ class LogStash::Outputs::CloudWatchLogs < LogStash::Outputs::Base
       @logger.warn(":buffer_duration is smaller than the min value. Use #{MIN_BUFFER_DURATION} instead.")
       @buffer_duration = MIN_BUFFER_DURATION
     end
-    @sequence_token = nil
+    @sequence_token = Hash.new
     @last_flush = Time.now.to_f
     @buffer = Buffer.new(
       max_batch_count: batch_count, max_batch_size: batch_size,
@@ -176,18 +176,18 @@ class LogStash::Outputs::CloudWatchLogs < LogStash::Outputs::Base
           :log_group_name => @cwl_cfg[:log_group_name],
           :log_stream_name => @cwl_cfg[:log_stream_name],
           :log_events => log_events,
-          :sequence_token => @sequence_token
+          :sequence_token => @sequence_token[@cwl_cfg[:log_group_name]+@cwl_cfg[:log_stream_name]]
       )
-      @sequence_token = response.next_sequence_token
+      @sequence_token[@cwl_cfg[:log_group_name]+@cwl_cfg[:log_stream_name]] = response.next_sequence_token
     rescue Aws::CloudWatchLogs::Errors::InvalidSequenceTokenException => e
       @logger.warn(e)
       if /sequenceToken(?:\sis)?: ([^\s]+)/ =~ e.to_s
         if $1 == 'null'
-          @sequence_token = nil
+          @sequence_token[@cwl_cfg[:log_group_name]+@cwl_cfg[:log_stream_name]] = nil
         else
-          @sequence_token = $1
+          @sequence_token[@cwl_cfg[:log_group_name]+@cwl_cfg[:log_stream_name]] = $1
         end
-        @logger.info("Will retry with new sequence token #{@sequence_token}")
+        @logger.info("Will retry with new sequence token #{@sequence_token[@cwl_cfg[:log_group_name]+@cwl_cfg[:log_stream_name]]}")
         retry
       else
         @logger.error("Cannot find sequence token from response")
@@ -196,9 +196,9 @@ class LogStash::Outputs::CloudWatchLogs < LogStash::Outputs::Base
       @logger.warn(e)
       if /sequenceToken(?:\sis)?: ([^\s]+)/ =~ e.to_s
         if $1 == 'null'
-          @sequence_token = nil
+          @sequence_token[@cwl_cfg[:log_group_name]+@cwl_cfg[:log_stream_name]] = nil
         else
-          @sequence_token = $1
+          @sequence_token[@cwl_cfg[:log_group_name]+@cwl_cfg[:log_stream_name]] = $1
         end
         @logger.info("Data already accepted and no need to resend")
       else
@@ -216,7 +216,7 @@ class LogStash::Outputs::CloudWatchLogs < LogStash::Outputs::Base
       begin
         @cwl.create_log_stream(:log_group_name => @cwl_cfg[:log_group_name], :log_stream_name => @cwl_cfg[:log_stream_name])
       rescue Aws::CloudWatchLogs::Errors::ResourceAlreadyExistsException => e
-        @logger.info("Log stream #{@log_stream_name} already exists")
+        @logger.info("Log stream #{@cwl_cfg[:log_stream_name]} already exists")
       rescue Exception => e
         @logger.error(e)
       end
