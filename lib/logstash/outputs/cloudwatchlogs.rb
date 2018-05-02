@@ -75,14 +75,13 @@ class LogStash::Outputs::CloudWatchLogs < LogStash::Outputs::Base
   # Print out the log events to stdout
   config :dry_run, :validate => :boolean, :default => false
 
-  attr_accessor :sequence_token, :last_flush, :cwl, :cwl_cfg
+  attr_accessor :sequence_token, :last_flush, :cwl
 
   # Only accessed by tests
   attr_reader :buffer
 
   public
   def register
-    @cwl_cfg = Hash.new
     @logger.info("aws_options_hash #{aws_options_hash}")
     @cwl = Aws::CloudWatchLogs::Client.new(aws_options_hash)
 
@@ -119,8 +118,6 @@ class LogStash::Outputs::CloudWatchLogs < LogStash::Outputs::Base
   public
   def receive(event)
     return unless output?(event)
-    @cwl_cfg[:log_group_name] = event.sprintf(@log_group_name)
-    @cwl_cfg[:log_stream_name] = event.sprintf(@log_stream_name)
 
     if event == LogStash::SHUTDOWN
       @buffer.close
@@ -152,19 +149,39 @@ class LogStash::Outputs::CloudWatchLogs < LogStash::Outputs::Base
     return if events.nil? or events.empty?
     log_event_batches = prepare_log_events(events)
     log_event_batches.each do |log_events|
-      put_log_events(log_events)
+      all_log_group_names  = Array.new
+      all_log_stream_names = Array.new
+      all_log_events       = Array.new
+      log_events.each do |event|
+        log_group_name  = event.sprintf(@log_group_name)
+        log_stream_name = event.sprintf(@log_stream_name)
+        all_log_group_names  << log_group_name
+        all_log_stream_names << log_stream_name
+        if all_log_events[log_group_name + log_stream_name].nil?
+          all_log_events[log_group_name + log_stream_name] = [event]
+        else
+          all_log_events[log_group_name + log_stream_name] << event
+        end
+      end
+      all_log_group_names.uniq!
+      all_log_stream_names.uniq!
+      all_log_group_names.each do |log_group_name|
+        all_log_stream_names.each do |log_stream_name|
+          put_log_events(all_log_events[log_group_name + log_stream_name], log_group_name, log_stream_name)
+        end
+      end
     end
   end
 
   private
-  def put_log_events(log_events)
+  def put_log_events(log_events, log_group_name, log_stream_name)
     return if log_events.nil? or log_events.empty?
     # Shouldn't send two requests within MIN_DELAY
     delay = MIN_DELAY - (Time.now.to_f - @last_flush)
     sleep(delay) if delay > 0
     backoff = 1
     begin
-      @logger.info("Sending #{log_events.size} events to #{@cwl_cfg[:log_group_name]}/#{@cwl_cfg[:log_stream_name]}")
+      @logger.info("Sending #{log_events.size} events to #{log_group_name}/#{log_stream_name}")
       @last_flush = Time.now.to_f
       if @dry_run
         log_events.each do |event|
@@ -172,22 +189,23 @@ class LogStash::Outputs::CloudWatchLogs < LogStash::Outputs::Base
         end
         return
       end
+
       response = @cwl.put_log_events(
-          :log_group_name => @cwl_cfg[:log_group_name],
-          :log_stream_name => @cwl_cfg[:log_stream_name],
+          :log_group_name => log_group_name,
+          :log_stream_name => log_stream_name,
           :log_events => log_events,
-          :sequence_token => @sequence_token[@cwl_cfg[:log_group_name]+@cwl_cfg[:log_stream_name]]
+          :sequence_token => @sequence_token[log_group_name + log_stream_name]
       )
-      @sequence_token[@cwl_cfg[:log_group_name]+@cwl_cfg[:log_stream_name]] = response.next_sequence_token
+      @sequence_token[log_group_name + log_stream_name] = response.next_sequence_token
     rescue Aws::CloudWatchLogs::Errors::InvalidSequenceTokenException => e
       @logger.warn(e)
       if /sequenceToken(?:\sis)?: ([^\s]+)/ =~ e.to_s
         if $1 == 'null'
-          @sequence_token[@cwl_cfg[:log_group_name]+@cwl_cfg[:log_stream_name]] = nil
+          @sequence_token[log_group_name + log_stream_name] = nil
         else
-          @sequence_token[@cwl_cfg[:log_group_name]+@cwl_cfg[:log_stream_name]] = $1
+          @sequence_token[log_group_name + log_stream_name] = $1
         end
-        @logger.info("Will retry with new sequence token #{@sequence_token[@cwl_cfg[:log_group_name]+@cwl_cfg[:log_stream_name]]}")
+        @logger.info("Will retry with new sequence token #{@sequence_token[log_group_name + log_stream_name]}")
         retry
       else
         @logger.error("Cannot find sequence token from response")
@@ -196,9 +214,9 @@ class LogStash::Outputs::CloudWatchLogs < LogStash::Outputs::Base
       @logger.warn(e)
       if /sequenceToken(?:\sis)?: ([^\s]+)/ =~ e.to_s
         if $1 == 'null'
-          @sequence_token[@cwl_cfg[:log_group_name]+@cwl_cfg[:log_stream_name]] = nil
+          @sequence_token[log_group_name + log_stream_name] = nil
         else
-          @sequence_token[@cwl_cfg[:log_group_name]+@cwl_cfg[:log_stream_name]] = $1
+          @sequence_token[log_group_name + log_stream_name] = $1
         end
         @logger.info("Data already accepted and no need to resend")
       else
@@ -207,16 +225,16 @@ class LogStash::Outputs::CloudWatchLogs < LogStash::Outputs::Base
     rescue Aws::CloudWatchLogs::Errors::ResourceNotFoundException => e
       @logger.info("Will create log group/stream and retry")
       begin
-        @cwl.create_log_group(:log_group_name => @cwl_cfg[:log_group_name])
+        @cwl.create_log_group(:log_group_name => log_group_name)
       rescue Aws::CloudWatchLogs::Errors::ResourceAlreadyExistsException => e
-        @logger.info("Log group #{@cwl_cfg[:log_group_name]} already exists")
+        @logger.info("Log group #{log_group_name} already exists")
       rescue Exception => e
         @logger.error(e)
       end
       begin
-        @cwl.create_log_stream(:log_group_name => @cwl_cfg[:log_group_name], :log_stream_name => @cwl_cfg[:log_stream_name])
+        @cwl.create_log_stream(:log_group_name => log_group_name, :log_stream_name => log_stream_name)
       rescue Aws::CloudWatchLogs::Errors::ResourceAlreadyExistsException => e
-        @logger.info("Log stream #{@cwl_cfg[:log_stream_name]} already exists")
+        @logger.info("Log stream #{log_stream_name} already exists")
       rescue Exception => e
         @logger.error(e)
       end
