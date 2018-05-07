@@ -111,7 +111,9 @@ class LogStash::Outputs::CloudWatchLogs < LogStash::Outputs::Base
 
     if @use_codec
       @codec.on_event() {|event, payload| @buffer.enq({:timestamp => event.timestamp.time.to_f*1000,
-        :message => payload})}
+        :message => payload,
+        :log_group => event.sprintf(@log_group_name),
+        :log_stream => event.sprintf(@log_stream_name)})}
     end
   end # def register
 
@@ -132,7 +134,9 @@ class LogStash::Outputs::CloudWatchLogs < LogStash::Outputs::Base
       @codec.encode(event)
     else
       @buffer.enq({:timestamp => event.timestamp.time.to_f*1000,
-       :message => event.get(MESSAGE) })
+       :message => event.get(MESSAGE),
+       :log_group => event.sprintf(@log_group_name),
+       :log_stream => event.sprintf(@log_stream_name)})
     end
   end # def receive
 
@@ -151,12 +155,14 @@ class LogStash::Outputs::CloudWatchLogs < LogStash::Outputs::Base
     log_event_batches.each do |log_events|
       all_log_group_names  = Array.new
       all_log_stream_names = Array.new
-      all_log_events       = Array.new
+      all_log_events       = Hash.new
       log_events.each do |event|
-        log_group_name  = event.sprintf(@log_group_name)
-        log_stream_name = event.sprintf(@log_stream_name)
+        log_group_name  = event[:log_group]
+        log_stream_name = event[:log_stream]
         all_log_group_names  << log_group_name
         all_log_stream_names << log_stream_name
+        event.delete(:log_group)
+        event.delete(:log_stream)
         if all_log_events[log_group_name + log_stream_name].nil?
           all_log_events[log_group_name + log_stream_name] = [event]
         else
@@ -191,10 +197,10 @@ class LogStash::Outputs::CloudWatchLogs < LogStash::Outputs::Base
       end
 
       response = @cwl.put_log_events(
-          :log_group_name => log_group_name,
+          :log_group_name  => log_group_name,
           :log_stream_name => log_stream_name,
-          :log_events => log_events,
-          :sequence_token => @sequence_token[log_group_name + log_stream_name]
+          :log_events      => log_events,
+          :sequence_token  => @sequence_token[log_group_name + log_stream_name]
       )
       @sequence_token[log_group_name + log_stream_name] = response.next_sequence_token
     rescue Aws::CloudWatchLogs::Errors::InvalidSequenceTokenException => e
